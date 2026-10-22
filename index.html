@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <title>Threads認証 - Rakuten Threads Bot</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif; }
+    body { margin: 0; background:#f6f8fb; color:#16202d; padding:22px; }
+    main { max-width:600px; background:#fff; margin:40px auto; border-radius:18px; padding:26px; box-shadow:0 8px 30px #11213914; }
+    h1 { font-size:1.4rem; margin-top:0; } p { line-height:1.7; }
+    textarea { box-sizing:border-box; width:100%; min-height:92px; border:1px solid #bcc9d7; border-radius:8px; padding:12px; font-size:14px; overflow-wrap:anywhere; }
+    button { padding:13px 18px; font-size:1rem; border:0; border-radius:9px; background:#143c73; color:white; margin-top:12px; }
+    .muted { font-size:.9rem; color:#596579; }
+    .notice { border-left:4px solid #3e72bb; padding-left:12px; }
+    #success, #failure { display:none; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Threads 認証コールバック</h1>
+  <p id="intro">このページはRakuten Threads Botの認証コードを受け取るためのものです。</p>
+  <section id="success">
+    <p class="notice"><strong>認証コードを受信しました。</strong> 下のボタンでコードをコピーし、安全な場所に一時保管してください。</p>
+    <textarea id="code" readonly aria-label="認証コード"></textarea>
+    <button type="button" id="copy">認証コードをコピー</button>
+    <p id="copy-status" role="status"></p>
+    <p class="muted">このコードは短時間で失効します。GitHubの公開リポジトリやチャットには貼らないでください。</p>
+  </section>
+  <section id="failure"><p class="notice" id="error"></p></section>
+  <p class="muted">このページではアプリシークレットやアクセストークンの入力・保存は行いません。</p>
+</main>
+<script>
+  (function () {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const error = params.get('error') || params.get('error_message') || params.get('error_description');
+    if (code || error) {
+      history.replaceState(null, '', location.pathname + location.hash);
+    }
+    if (code) {
+      document.getElementById('intro').textContent = 'Threadsの認証操作が戻ってきました。';
+      document.getElementById('code').value = code;
+      document.getElementById('success').style.display = 'block';
+      document.getElementById('copy').addEventListener('click', async () => {
+        const field = document.getElementById('code');
+        try {
+          await navigator.clipboard.writeText(field.value);
+          document.getElementById('copy-status').textContent = 'コピーしました。';
+        } catch (e) {
+          field.focus(); field.select();
+          document.getElementById('copy-status').textContent = 'コードを選択しました。メニューからコピーしてください。';
+        }
+      });
+    } else if (error) {
+      document.getElementById('error').textContent = '認証が完了しませんでした：' + error;
+      document.getElementById('failure').style.display = 'block';
+    }
+  }());
+</script>
+</body>
+</html>
