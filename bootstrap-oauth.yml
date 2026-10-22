@@ -1,0 +1,92 @@
+name: Bootstrap Threads OAuth code
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rtbot-state
+  cancel-in-progress: false
+
+jobs:
+  bootstrap-oauth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      THREADS_APP_ID: ${{ secrets.THREADS_APP_ID }}
+      THREADS_APP_SECRET: ${{ secrets.THREADS_APP_SECRET }}
+      THREADS_AUTH_CODE: ${{ secrets.THREADS_AUTH_CODE }}
+      STATE_ENCRYPTION_KEY: ${{ secrets.STATE_ENCRYPTION_KEY }}
+      STATE_DIR: state_dir
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Prepare encrypted state branch
+        run: bash scripts/state_prepare.sh
+      - name: Exchange authorization code and encrypt long-lived token
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          from pathlib import Path
+          import requests
+          from rtbot.threads import ThreadsClient
+          from rtbot.store import StateStore, TokenState
+
+          keys = ('THREADS_APP_ID', 'THREADS_APP_SECRET', 'THREADS_AUTH_CODE', 'STATE_ENCRYPTION_KEY')
+          missing = [key for key in keys if not os.environ.get(key, '').strip()]
+          if missing:
+              raise RuntimeError('GitHub Secrets が未設定です: ' + ', '.join(missing))
+
+          app_id = os.environ['THREADS_APP_ID'].strip()
+          app_secret = os.environ['THREADS_APP_SECRET'].strip()
+          code = os.environ['THREADS_AUTH_CODE'].strip()
+          redirect_uri = 'https://osorann.github.io/threads-oauth-callback/'
+
+          # OAuth authorization code is single-use. Never print it or any token.
+          response = requests.post(
+              'https://graph.threads.net/oauth/access_token',
+              data={
+                  'client_id': app_id,
+                  'client_secret': app_secret,
+                  'code': code,
+                  'grant_type': 'authorization_code',
+                  'redirect_uri': redirect_uri,
+              },
+              timeout=30,
+          )
+          if not response.ok:
+              raise RuntimeError(
+                  f'認証コードの交換に失敗 (HTTP {response.status_code})。'
+                  'コードの有効期限と未使用状態、Threads App ID、リダイレクトURLを確認してください。'
+              )
+          short_token = response.json().get('access_token')
+          if not short_token:
+              raise RuntimeError('短期アクセストークンが応答にありません')
+
+          threads = ThreadsClient()
+          long_lived = threads.exchange_long_lived(short_token, app_secret)
+          token = long_lived['access_token']
+          user = threads.me(token)
+          now = time.time()
+          StateStore(Path(os.environ['STATE_DIR']), os.environ['STATE_ENCRYPTION_KEY']).save_token(
+              TokenState(
+                  access_token=token,
+                  expires_at=now + int(long_lived.get('expires_in', 60 * 86400)),
+                  refreshed_at=now,
+                  user_id=str(user['id']),
+                  username=str(user.get('username', '')),
+              )
+          )
+          print('Threads の長期トークンを暗号化して保存しました。')
+          print('成功後は THREADS_AUTH_CODE Secret を削除してください。')
+          PY
+      - name: Commit encrypted state
+        run: bash scripts/state_commit.sh
